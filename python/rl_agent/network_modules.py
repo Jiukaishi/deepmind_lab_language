@@ -21,8 +21,8 @@ class Vision_M(nn.Module):
         
     def forward(self, x):
         # x is input image with shape [3, 84, 84]
-        out = self.conv1(x)
-        out = self.conv2(out)
+        out = F.relu(self.conv1(x))
+        out = F.relu(self.conv2(out))
         out = self.conv3(out)
         
         return out
@@ -77,6 +77,7 @@ class Mixing_M(nn.Module):
 class Action_M(nn.Module):
     def __init__(self, batch_size=1, hidden_size=256):
         super(Action_M, self).__init__()
+        self.counter = 0
         self.batch_size = batch_size
         self.hidden_size = hidden_size
         
@@ -95,13 +96,19 @@ class Action_M(nn.Module):
                 x: x is output from the Mixing Module, as shape [batch_size, 1, 3264]
         '''
         # Feed forward
+        self.counter += 1
         h1, c1 = self.lstm_1(x, self.hidden_1)
         h2, c2 = self.lstm_2(h1, self.hidden_2)
         
         # Update current hidden state
-        self.hidden_1 = (h1.data, c1.data)
-        self.hidden_2 = (h2.data, c2.data)
-        
+        if self.counter >= 50:
+            self.hidden_1 = (h1.data, c1.data)
+            self.hidden_2 = (h2.data, c2.data)
+            self.counter = 0
+        else:
+            self.hidden_1 = (h1, c1)
+            self.hidden_2 = (h2, c2)
+         
         '''
         ###################################################################################################
         Change h, c to h.data and c.data due to the cuda out of memory with retain_graph = True in backward
@@ -159,10 +166,13 @@ class temporal_AutoEncoder(nn.Module):
         self.vision_module = vision_module
     
         self.linear_1 = nn.Linear(128, 64 * 7 * 7)
+        nn.init.uniform_(self.linear_1.weight, 0.1, 1)
 
         self.deconv = nn.Sequential(
                         nn.ConvTranspose2d(in_channels=64, out_channels=64, kernel_size=3, stride=1),
+                        nn.ReLU(),
                         nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=4, stride=2),
+                        nn.ReLU(),
                         nn.ConvTranspose2d(in_channels=32, out_channels=3,  kernel_size=8, stride=4))
     
     def forward(self, visual_input, logit_action):
@@ -188,14 +198,13 @@ class Language_Prediction(nn.Module):
         super(Language_Prediction, self).__init__()
         self.language_module = language_module
         
-        self.vision_transform = nn.Sequential(
-                            nn.Linear(64 * 7 * 7, 128),
-                            nn.ReLU())
+        self.vision_transform = nn.Linear(64 * 7 * 7, 128)
+        nn.init.uniform_(self.vision_transform.weight, 0.1, 1)
     
     def forward(self, vision_encoded):
             
         vision_encoded_flatten = vision_encoded.view(vision_encoded.size()[0], -1)
-        vision_out = self.vision_transform(vision_encoded_flatten)
+        vision_out = F.relu(self.vision_transform(vision_encoded_flatten))
         
         language_predict = self.language_module.LP(vision_out)
         
@@ -210,6 +219,7 @@ class RewardPredictor(nn.Module):
         self.language_module = language_module
         self.mixing_module = mixing_module
         self.linear = nn.Linear(3 * (64 * 7 * 7 + 128), 1)
+        nn.init.uniform_(self.linear.weight,0.1,1)
     
     def forward(self, x):
         '''

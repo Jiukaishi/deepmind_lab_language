@@ -212,7 +212,7 @@ class RL_Agent(object):
                      reward_prediction_loss +  tae_loss +  \
                       value_replay_loss)
         #print(policy_loss.data, value_loss.data, reward_prediction_loss.data, tae_loss.data, value_replay_loss.data)
-        total_loss.backward(retain_graph = False)
+        total_loss.backward(retain_graph = True)
         '''
         #############################################################################################
         change retain_graph to False after changing the input in Action_M from h, c to h.data, c.data
