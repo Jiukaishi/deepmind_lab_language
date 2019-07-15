@@ -111,7 +111,7 @@ class RL_Agent(object):
             _action(0, 0, 0, 0, 0, 0, 1)]
         
         self.model = Model(len(self.ACTIONS))
-        self.optimizer = optim.RMSprop(self.model.parameters(), lr=0.0001)
+        self.optimizer = optim.RMSprop(self.model.parameters(), lr=0.0001, eps = 0.1, weight_decay = 0.99)
         self.model.cuda()
         
         self.memory = ReplayMemory(300)
