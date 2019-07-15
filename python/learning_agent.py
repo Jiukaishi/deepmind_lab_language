@@ -24,12 +24,12 @@ parser.add_argument('--level_script', type=str, default='contributed/dmlab30/lan
 
 parser.add_argument('--tau', type=int, default=0.99, help='Training hyperparameter')
 parser.add_argument('--gamma', type=int, default=0.99, help='Discounted factor')
-parser.add_argument('--clip-grad-norm', type=int, default=1.0, help='Clip gradient')
+parser.add_argument('--clip-grad-norm', type=int, default=100, help='Clip gradient')
 parser.add_argument('--num-episodes', type=int, default=500, help='Number of training episodes')
 
 args = parser.parse_args()
 if args.runfiles_path:
-  deepmind_lab.set_runfiles_path(args.runfiles_path)
+    deepmind_lab.set_runfiles_path(args.runfiles_path)
 
 
 # Create environment

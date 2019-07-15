@@ -111,7 +111,7 @@ class RL_Agent(object):
             _action(0, 0, 0, 0, 0, 0, 1)]
         
         self.model = Model(len(self.ACTIONS))
-        self.optimizer = optim.RMSprop(self.model.parameters(), lr=0.0001)
+        self.optimizer = optim.RMSprop(self.model.parameters(), lr=0.0001, eps = 0.1, weight_decay = 0.99)
         self.model.cuda()
         
         self.memory = ReplayMemory(300)
@@ -212,7 +212,7 @@ class RL_Agent(object):
                      reward_prediction_loss +  tae_loss +  \
                       value_replay_loss)
         #print(policy_loss.data, value_loss.data, reward_prediction_loss.data, tae_loss.data, value_replay_loss.data)
-        total_loss.backward(retain_graph = False)
+        total_loss.backward(retain_graph = True)
         '''
         #############################################################################################
         change retain_graph to False after changing the input in Action_M from h, c to h.data, c.data
@@ -257,7 +257,6 @@ class RL_Agent(object):
                 episode_length += 1
                 #with torch.no_grad():
                 logit, value = self.model(state)
-                logit = logit.data
                 # Calculate entropy from action probability distribution
                 prob = F.softmax(logit)
                 log_prob = F.log_softmax(logit)
