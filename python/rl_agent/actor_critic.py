@@ -199,7 +199,7 @@ class RL_Agent(object):
 
         # Value function replay
         index = np.random.randint(0, 10)
-        R_vr = auxiliary_batch.value[index+1].data + self.args.gamma * auxiliary_batch.reward[index]
+        R_vr = auxiliary_batch.value[index+1].data * self.args.gamma + auxiliary_batch.reward[index]
         value_replay_loss = 0.5 * torch.squeeze((R_vr - auxiliary_batch.value[index]).pow(2))
         '''
         ###########################
@@ -308,5 +308,3 @@ class RL_Agent(object):
 
                     break
                
-        np.save('/home/km/rl_loss.npy', np.array(loss_buffer))
-        np.save('/home/km/rl_rewards.npy', np.array(rewards_buffer))
