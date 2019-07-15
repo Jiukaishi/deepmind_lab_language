@@ -983,6 +983,14 @@ py_binary(
     deps = [":python_random_agent_lib"],
 )
 
+
+py_binary(
+    name = "learning_agent",
+    srcs = ["python/learning_agent.py"],
+    data = [":deepmind_lab.so"],
+    main = "python/learning_agent.py",
+)
+
 py_library(
     name = "python_random_agent_lib",
     srcs = ["python/random_agent.py"],

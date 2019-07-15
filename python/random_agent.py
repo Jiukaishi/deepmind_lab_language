@@ -152,7 +152,7 @@ def run(length, width, height, fps, level, record, demo, demofiles, video):
     config['demofiles'] = demofiles
   if video:
     config['video'] = video
-  env = deepmind_lab.Lab(level, ['RGB_INTERLEAVED'], config=config)
+  env = deepmind_lab.Lab(level, ['RGBD','INSTR'], config=config)
 
   env.reset()
 
@@ -168,7 +168,7 @@ def run(length, width, height, fps, level, record, demo, demofiles, video):
       env.reset()
       agent.reset()
     obs = env.observations()
-    action = agent.step(reward, obs['RGB_INTERLEAVED'])
+    action = agent.step(reward, obs['RGBD'])
     reward = env.step(action, num_steps=1)
 
   print('Finished after %i steps. Total reward received is %f'
@@ -188,7 +188,7 @@ if __name__ == '__main__':
   parser.add_argument('--runfiles_path', type=str, default=None,
                       help='Set the runfiles path to find DeepMind Lab data')
   parser.add_argument('--level_script', type=str,
-                      default='tests/empty_room_test',
+                      default='contributed/dmlab30/language_select_described_object',
                       help='The environment level script to load')
   parser.add_argument('--record', type=str, default=None,
                       help='Record the run to a demo file')

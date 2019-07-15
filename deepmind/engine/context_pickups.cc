@@ -257,8 +257,9 @@ bool ContextPickups::FindItem(const char* class_name, int* index) {
 
   lua::TableRef table;
   CHECK(Read(L, -1, &table)) << "Failed to read pickup table!";
-
+  
   PickupItem item = {};
+  
   CHECK(table.LookUp("name", &item.name));
   CHECK(table.LookUp("classname", &item.class_name));
   CHECK(table.LookUp("model", &item.model_name));
