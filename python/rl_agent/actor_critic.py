@@ -211,7 +211,7 @@ class RL_Agent(object):
         total_loss = (policy_loss + 0.5 * value_loss +  \
                      reward_prediction_loss +  tae_loss +  \
                       value_replay_loss)
-        #print(policy_loss.data, value_loss.data, reward_prediction_loss.data, tae_loss.data, value_replay_loss.data)
+        print(policy_loss.data, value_loss.data, reward_prediction_loss.data, tae_loss.data, value_replay_loss.data)
         total_loss.backward(retain_graph = True)
         '''
         #############################################################################################
@@ -231,7 +231,12 @@ class RL_Agent(object):
         img = np.expand_dims(np.transpose(state['RGB_INTERLEAVED'], (2, 0, 1)), 0)
         #order = np.expand_dims((state['ORDER']), 0)
         
-        img = torch.from_numpy(img).type(torch.cuda.FloatTensor)
+        img = torch.from_numpy(img.astype(float)/255).type(torch.cuda.FloatTensor)
+        '''
+        ####################
+        rescale img to [0,1]
+        ####################
+        '''
         order = torch.tensor([[word2id[word] for word in state['INSTR'].split()]]).type(torch.cuda.LongTensor)
         
         return State(img, order)
@@ -302,8 +307,10 @@ class RL_Agent(object):
                         print('Episode {} / {} has completed. Episode loss is {}. Episode reward is {}.'.
                                     format(episode, self.args.num_episodes, loss, reward))
                     self.memory.clear()
-
+                    # kill the gradient after each episode
+                    self.model.action_reset()
                     rewards_buffer.append(reward)
 
                     break
+                    
                

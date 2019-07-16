@@ -28,6 +28,9 @@ class Model(nn.Module):
         self.language_predictor = Language_Prediction(self.language_m)
         self.reward_predictor = RewardPredictor(self.vision_m, self.language_m, self.mixing_m)
         
+    def action_reset(self):
+        self.action_m.reset()
+        
         
     def forward(self, x):
         '''

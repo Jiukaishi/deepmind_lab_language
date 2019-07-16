@@ -77,7 +77,6 @@ class Mixing_M(nn.Module):
 class Action_M(nn.Module):
     def __init__(self, batch_size=1, hidden_size=256):
         super(Action_M, self).__init__()
-        self.counter = 0
         self.batch_size = batch_size
         self.hidden_size = hidden_size
         
@@ -90,24 +89,28 @@ class Action_M(nn.Module):
         self.hidden_2 = (Variable(torch.randn(batch_size, hidden_size)).cuda(), 
                         Variable(torch.randn(batch_size, hidden_size)).cuda()) 
         
+    def reset(self):
+          
+        # kill the gradient
+        h1, c1 = self.hidden_1
+        h2, c2 = self.hidden_2
+        self.hidden_1 = (h1.data, c1.data)
+        self.hidden_2 = (h2.data, c2.data)
+ 
+        
     def forward(self, x):
         '''
             Argument:
                 x: x is output from the Mixing Module, as shape [batch_size, 1, 3264]
         '''
         # Feed forward
-        self.counter += 1
+
         h1, c1 = self.lstm_1(x, self.hidden_1)
         h2, c2 = self.lstm_2(h1, self.hidden_2)
         
         # Update current hidden state
-        if self.counter >= 50:
-            self.hidden_1 = (h1.data, c1.data)
-            self.hidden_2 = (h2.data, c2.data)
-            self.counter = 0
-        else:
-            self.hidden_1 = (h1, c1)
-            self.hidden_2 = (h2, c2)
+        self.hidden_1 = (h1, c1)
+        self.hidden_2 = (h2, c2)
          
         '''
         ###################################################################################################
@@ -173,7 +176,9 @@ class temporal_AutoEncoder(nn.Module):
                         nn.ReLU(),
                         nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=4, stride=2),
                         nn.ReLU(),
-                        nn.ConvTranspose2d(in_channels=32, out_channels=3,  kernel_size=8, stride=4))
+                        nn.ConvTranspose2d(in_channels=32, out_channels=3,  kernel_size=8, stride=4),
+                        nn.Softmax2d())
+     
     
     def forward(self, visual_input, logit_action):
         '''
