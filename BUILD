@@ -969,6 +969,7 @@ cc_binary(
     visibility = [
         "//python/pip_package:__subpackages__",
         "//python/tests:__subpackages__",
+        "//unreal:__subpackages__",
     ],
     deps = [
         ":dmlablib",
@@ -1051,3 +1052,4 @@ test_suite(
     )
     for level_name in SEED_TEST_SCRIPTS
 ]
+package(default_visibility = ["//visibility:public"])

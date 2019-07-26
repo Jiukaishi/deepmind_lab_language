@@ -83,34 +83,19 @@ class Action_M(nn.Module):
         self.lstm_1 = nn.LSTMCell(input_size=3264, hidden_size=256)
         self.lstm_2 = nn.LSTMCell(input_size=256, hidden_size=256)
         
-        self.hidden_1 = (Variable(torch.randn(batch_size, hidden_size)).cuda(), 
-                        Variable(torch.randn(batch_size, hidden_size)).cuda()) 
-        
-        self.hidden_2 = (Variable(torch.randn(batch_size, hidden_size)).cuda(), 
-                        Variable(torch.randn(batch_size, hidden_size)).cuda()) 
-        
-    def reset(self):
-          
-        # kill the gradient
-        h1, c1 = self.hidden_1
-        h2, c2 = self.hidden_2
-        self.hidden_1 = (h1.data, c1.data)
-        self.hidden_2 = (h2.data, c2.data)
  
         
-    def forward(self, x):
+    def forward(self, x, h1, c1, h2, c2):
         '''
             Argument:
                 x: x is output from the Mixing Module, as shape [batch_size, 1, 3264]
         '''
         # Feed forward
 
-        h1, c1 = self.lstm_1(x, self.hidden_1)
-        h2, c2 = self.lstm_2(h1, self.hidden_2)
+        h1, c1 = self.lstm_1(x, (h1,c1))
+        h2, c2 = self.lstm_2(h1, (h2,c2))
         
         # Update current hidden state
-        self.hidden_1 = (h1, c1)
-        self.hidden_2 = (h2, c2)
          
         '''
         ###################################################################################################
@@ -119,7 +104,7 @@ class Action_M(nn.Module):
         '''
         
         # Return the hidden state of the upper layer
-        return h2
+        return h1, c1, h2, c2
     
     
 SavedAction = namedtuple('SavedAction', ['action', 'value'])
