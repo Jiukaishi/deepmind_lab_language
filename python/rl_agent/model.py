@@ -5,7 +5,7 @@ from torch.autograd import Variable
 import torch.optim as optim
 import numpy as np
 from collections import namedtuple
-from network_modules import *
+from rl_agent.network_modules import *
 
 
 State = namedtuple('State', ('visual', 'instruction'))
@@ -29,7 +29,7 @@ class Model(nn.Module):
         self.reward_predictor = RewardPredictor(self.vision_m, self.language_m, self.mixing_m)
         
         
-    def forward(self, x):
+    def forward(self, x, h1, c1, h2, c2):
         '''
         Argument:
         
@@ -40,8 +40,8 @@ class Model(nn.Module):
         vision_out = self.vision_m(x.visual)
         language_out = self.language_m(x.instruction)
         mix_out = self.mixing_m(vision_out, language_out)
-        action_out = self.action_m(mix_out)
+        h1, c1, h2, c2 = self.action_m(mix_out, h1, c1, h2, c2)
         
-        action_prob, value = self.policy(action_out)
+        action_prob, value = self.policy(h2)
         
-        return action_prob, value
+        return action_prob, value, h1, c1, h2, c2
