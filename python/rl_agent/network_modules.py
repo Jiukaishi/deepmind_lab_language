@@ -6,6 +6,7 @@ from torch.autograd import Variable
 import torch.optim as optim
 import numpy as np
 from collections import namedtuple
+from rl_agent.utils import *
 
 class Vision_M(nn.Module):
     def __init__(self):
@@ -29,7 +30,7 @@ class Vision_M(nn.Module):
     
 
 class Language_M(nn.Module):
-    def __init__(self, vocab_size=11, embed_dim=128, hidden_size=128):
+    def __init__(self, vocab_size=len(vocab), embed_dim=128, hidden_size=128):
         '''
             Use the same hyperparameter settings denoted in the paper
         '''
@@ -41,14 +42,14 @@ class Language_M(nn.Module):
         
         self.embeddings = nn.Embedding(vocab_size, embed_dim)  
         self.embeddings.weight = Parameter(torch.FloatTensor(self.vocab_size, embed_dim).uniform_(0.5,1))
-        self.lstm = nn.LSTM(embed_dim, hidden_size, num_layers=1, batch_first=True)
+        #self.lstm = nn.LSTM(embed_dim, hidden_size, num_layers=1, batch_first=True)
         
     def forward(self, x):
         embedded_input = self.embeddings(x)
-        out, hn = self.lstm(embedded_input)
-        h, c = hn
+        #out, hn = self.lstm(embedded_input)
+        #h, c = hn
         
-        return h
+        return embedded_input
 
     def LP(self, x):
         return F.linear(x, self.embeddings.weight)
@@ -94,14 +95,6 @@ class Action_M(nn.Module):
 
         h1, c1 = self.lstm_1(x, (h1,c1))
         h2, c2 = self.lstm_2(h1, (h2,c2))
-        
-        # Update current hidden state
-         
-        '''
-        ###################################################################################################
-        Change h, c to h.data and c.data due to the cuda out of memory with retain_graph = True in backward
-        ###################################################################################################
-        '''
         
         # Return the hidden state of the upper layer
         return h1, c1, h2, c2
