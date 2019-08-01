@@ -6,7 +6,8 @@ import torch.optim as optim
 import numpy as np
 from collections import namedtuple
 from rl_agent.network_modules import *
-
+from rl_agent.utils import *
+from seq2seq import *
 
 State = namedtuple('State', ('visual', 'instruction'))
 
@@ -45,3 +46,24 @@ class Model(nn.Module):
         action_prob, value = self.policy(h2)
         
         return action_prob, value, h1, c1, h2, c2
+    
+    
+class Adv_Model(Model):
+    def __init__(self, action_space):
+        super(Adv_Model, self).__init__(action_space)
+        self.embed_n = 128
+        self.state_hidden_n = 64
+        self.vocab_size = 13
+        self.max_advice_length = 9
+        self.prior_decoder = DecoderRNN(self.embed_n, self.vocab_size)
+        self.post_rnn = nn.GRU(3264, 3264, batch_first=True)
+        self.post_decoder = DecoderRNN(3264, self.vocab_size)
+     
+    def posterior_forward(self, representations, representation_lengths):
+
+        representations, _ = self.post_rnn(representations, None)
+
+        row_indices = torch.arange(0, representation_lengths.size(0)).long()
+        representations = representations[row_indices, representation_lengths-1, :]        
+        return representations
+    

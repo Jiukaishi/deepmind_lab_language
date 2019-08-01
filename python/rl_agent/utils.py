@@ -2,7 +2,12 @@ import numpy as np
 import torch
 from torch.autograd import Variable
 from collections import namedtuple
+from collections import defaultdict
+import math
 
+START = "<s>"
+STOP = "</s>"
+'''
 vocab = {
         'the',
         'Pick',
@@ -16,7 +21,49 @@ vocab = {
         'yellow',
         'object',
     }
-
+'''
+vocab = {
+    'apple2',
+        'ball',
+        'balloon',
+        'banana',
+        'bottle',
+        'cake',
+        'can',
+        'car',
+        'cassette',
+        'chair',
+        'cherries',
+        'cow',
+        'flower',
+        'fork',
+        'fridge',
+        'guitar',
+        'hair_brush',
+        'hammer',
+        'hat',
+        'ice_lolly',
+        'jug',
+        'key',
+        'knife',
+        'ladder',
+        'mug',
+        'pencil',
+        'pig',
+        'pincer',
+        'plant',
+        'saxophone',
+        'shoe',
+        'spoon',
+        'suitcase',
+        'tennis_racket',
+        'tomato',
+        'toothbrush',
+        'tree',
+        'tv',
+        'wine_glass',
+        'zebra',
+}
 word2id = dict(zip(vocab, range(len(vocab))))
 
 Transition = namedtuple('Transition',
@@ -41,21 +88,92 @@ ACTIONS = [
             _action(0, 0, 0, 0, 0, 1, 0),
             _action(0, 0, 0, 0, 0, 0, 1)]
 
-class SharedRMSprop(torch.optim.RMSprop):
-    def __init__(self, params, lr=1e-3, alpha = 0.99, eps=1e-8,
-                 weight_decay=0, momentum=0):
-        super(SharedRMSprop, self).__init__(params, lr=lr, alpha=alpha, eps=eps, weight_decay=weight_decay)
-        # State initialization
+class SharedRMSprop(torch.optim.Optimizer):
+    """Implements RMSprop algorithm with shared states.
+    """
+
+    def __init__(self,
+                 params,
+                 lr=7e-4,
+                 alpha=0.99,
+                 eps=0.1,
+                 weight_decay=0,
+                 momentum=0,
+                 centered=False):
+        defaults = defaultdict(
+            lr=lr,
+            alpha=alpha,
+            eps=eps,
+            weight_decay=weight_decay,
+            momentum=momentum,
+            centered=centered)
+        super(SharedRMSprop, self).__init__(params, defaults)
+
         for group in self.param_groups:
             for p in group['params']:
                 state = self.state[p]
-                state['step'] = 0
-                state['exp_avg'] = torch.zeros_like(p.data)
-                state['exp_avg_sq'] = torch.zeros_like(p.data)
+                state['step'] = torch.zeros(1)
+                state['grad_avg'] = p.data.new().resize_as_(p.data).zero_()
+                state['square_avg'] = p.data.new().resize_as_(p.data).zero_()
+                state['momentum_buffer'] = p.data.new().resize_as_(
+                    p.data).zero_()
 
-                # share in memory
-                state['exp_avg'].share_memory_()
-                state['exp_avg_sq'].share_memory_()
+    def share_memory(self):
+        for group in self.param_groups:
+            for p in group['params']:
+                state = self.state[p]
+                state['square_avg'].share_memory_()
+                state['step'].share_memory_()
+                state['grad_avg'].share_memory_()
+                state['momentum_buffer'].share_memory_()
+
+    def step(self, closure=None):
+        """Performs a single optimization step.
+        Arguments:
+            closure (callable, optional): A closure that reevaluates the model
+                and returns the loss.
+        """
+        loss = None
+        if closure is not None:
+            loss = closure()
+
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                grad = p.grad.data
+                if grad.is_sparse:
+                    raise RuntimeError(
+                        'RMSprop does not support sparse gradients')
+                state = self.state[p]
+
+                square_avg = state['square_avg']
+                alpha = group['alpha']
+
+                state['step'] += 1
+
+                if group['weight_decay'] != 0:
+                    grad = grad.add(group['weight_decay'], p.data)
+
+                square_avg.mul_(alpha).addcmul_(1 - alpha, grad, grad)
+
+                if group['centered']:
+                    grad_avg = state['grad_avg']
+                    grad_avg.mul_(alpha).add_(1 - alpha, grad)
+                    avg = square_avg.addcmul(-1, grad_avg,
+                                             grad_avg).sqrt().add_(
+                                                 group['eps'])
+                else:
+                    avg = square_avg.sqrt().add_(group['eps'])
+
+                if group['momentum'] > 0:
+                    buf = state['momentum_buffer']
+                    buf.mul_(group['momentum']).addcdiv_(grad, avg)
+                    p.data.add_(-group['lr'], buf)
+                else:
+                    p.data.addcdiv_(-group['lr'], grad, avg)
+
+        return loss
                 
 def mse_loss(predicted, target):
     return torch.sum((predicted - target) ** 2)
