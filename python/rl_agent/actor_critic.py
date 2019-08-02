@@ -155,7 +155,7 @@ class RL_Agent(object):
             reward_prediction_loss = \
                             torch.sum((rp_predicted - Variable(torch.FloatTensor(batch_rp_output)).to(self.device)).pow(2))
          # Value function replay
-        index = np.random.randint(0, len(values))
+        index = np.random.randint(0, len(rewards))
         R_vr = values[index+1].data * self.args.gamma + rewards[index]
         value_replay_loss = 0.5 * torch.squeeze((R_vr - values[index]).pow(2))
 
