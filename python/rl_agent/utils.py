@@ -1,8 +1,10 @@
 import numpy as np
 import torch
+import random
 from torch.autograd import Variable
 from collections import namedtuple
 from collections import defaultdict
+from collections import deque
 import math
 
 START = "<s>"
@@ -67,26 +69,27 @@ vocab = {
 word2id = dict(zip(vocab, range(len(vocab))))
 
 Transition = namedtuple('Transition',
-                        ('state', 'action_logit', 'next_state', 'reward', 'value'))
+                        ('state', 'action', 'next_state', 'reward', 'value'))
 
 State = namedtuple('State', ('visual', 'instruction'))
 
+        
+    
 def _action(*entries):
     return np.array(entries, dtype=np.intc)
 
 
 ACTIONS = [
-            _action(-20, 0, 0, 0, 0, 0, 0),
-            _action(20, 0, 0, 0, 0, 0, 0),
-            _action(0, 10, 0, 0, 0, 0, 0),
-            _action(0, -10, 0, 0, 0, 0, 0),
-            _action(0, 0, -1, 0, 0, 0, 0),
-            _action(0, 0, 1, 0, 0, 0, 0),
-            _action(0, 0, 0, 1, 0, 0, 0),
-            _action(0, 0, 0, -1, 0, 0, 0),
-            _action(0, 0, 0, 0, 1, 0, 0),
-            _action(0, 0, 0, 0, 0, 1, 0),
-            _action(0, 0, 0, 0, 0, 0, 1)]
+    _action(0, 0, 0, 1, 0, 0, 0),    # Forward
+    _action(0, 0, 0, -1, 0, 0, 0),   # Backward
+    _action(0, 0, -1, 0, 0, 0, 0),   # Strafe Left
+    _action(0, 0, 1, 0, 0, 0, 0),    # Strafe Right
+    _action(-20, 0, 0, 0, 0, 0, 0),  # Look Left
+    _action(20, 0, 0, 0, 0, 0, 0),   # Look Right
+    _action(-20, 0, 0, 1, 0, 0, 0),  # Look Left + Forward
+    _action(20, 0, 0, 1, 0, 0, 0),   # Look Right + Forward
+    _action(0, 0, 0, 0, 1, 0, 0),    # Fire.
+]
 
 class SharedRMSprop(torch.optim.Optimizer):
     """Implements RMSprop algorithm with shared states.
@@ -182,25 +185,84 @@ class ReplayMemory(object):
 
     def __init__(self, capacity):
         self.capacity = capacity
-        self.memory = []
+        self.memory = deque(maxlen = capacity)
+        self._zero_reward_indices = deque()
+        self._non_zero_reward_indices = deque()
+        self._top_frame_index = 0
         
-    def push(self, *args):
+    def push(self, episode_length, *args):
         self.memory.append(Transition(*args))
-        
-        while len(self.memory) > self.capacity:
-            self.memory.pop(0)
+        frame_index = self._top_frame_index + len(self.memory)
+        was_full = self.full()
+        if episode_length > 3:
+            if args[3] == 0:
+                self._zero_reward_indices.append(frame_index)
+            else:
+                self._non_zero_reward_indices.append(frame_index)
+                
+        if was_full:
+            self._top_frame_index += 1
 
+            cut_frame_index = self._top_frame_index + 3
+            # Cut frame if its index is lower than cut_frame_index.
+            if len(self._zero_reward_indices) > 0 and \
+                    self._zero_reward_indices[0] < cut_frame_index:
+                self._zero_reward_indices.popleft()
+
+            if len(self._non_zero_reward_indices) > 0 and \
+                    self._non_zero_reward_indices[0] < cut_frame_index:
+                self._non_zero_reward_indices.popleft()
+
+        
     def sample(self, batch_size):
-        start_index = np.random.randint(0, len(self.memory) - batch_size)
-        return self.memory[start_index : start_index + batch_size]
+        return random.sample(self.memory, batch_size)
+        
+        
+    def sample_vr(self):   
+        index = np.random.randint(len(self._zero_reward_indices) + len(self._non_zero_reward_indices))
+         
+        if index < len(self._non_zero_reward_indices):
+            index = np.random.randint(len(self._non_zero_reward_indices))
+            end_index = self._non_zero_reward_indices[index]
+        else:
+            index = np.random.randint(len(self._zero_reward_indices))
+            end_index = self._zero_reward_indices[index]
+            
+        start_index = end_index - 3 - self._top_frame_index
+        sampled_frames = []
+        for i in range(4):
+            sampled_frames.append(self.memory[start_index+i])
+            
+        return sampled_frames
+            
     
     def sample_rp(self, batch_size):
-        from_zero  = np.random.randint(2)
-        if from_zero:
-            return self.memory[len(self.memory) - batch_size : len(self.memory)]
-        else:
-            start_index = np.random.randint(0, len(self.memory) -batch_size -1)
-            return self.memory[start_index : start_index + batch_size]
+        rp_sample = []
+        for i in range(batch_size):
+            from_zero  = np.random.randint(2)
+
+            if len(self._zero_reward_indices) == 0:
+                # zero rewards container was empty
+                from_zero = False
+            elif len(self._non_zero_reward_indices) == 0:
+                # non zero rewards container was empty
+                from_zero = True
+
+            if from_zero:
+                index = np.random.randint(len(self._zero_reward_indices))
+                end_index = self._zero_reward_indices[index]
+            else:
+                index = np.random.randint(len(self._non_zero_reward_indices))
+                end_index = self._non_zero_reward_indices[index]
+
+            start_index = end_index - 3 - self._top_frame_index
+            sampled_frames = []
+            for i in range(4):
+                sampled_frames.append(self.memory[start_index+i])
+            rp_sample.append(Transition(*zip(*sampled_frames)))
+            
+        return rp_sample
+
         
     def __len__(self):
         return(len(self.memory))

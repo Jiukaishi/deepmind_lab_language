@@ -32,7 +32,7 @@ parser.add_argument('--seed', type=int, default=1,
 parser.add_argument('--tau', type=int, default=0.99, help='Training hyperparameter')
 parser.add_argument('--gamma', type=int, default=0.99, help='Discounted factor')
 parser.add_argument('--clip-grad-norm', type=int, default=100, help='Clip gradient')
-parser.add_argument('--num-episodes', type=int, default=90000, help='Number of training episodes')
+parser.add_argument('--num-episodes', type=int, default=400000, help='Number of training episodes')
 parser.add_argument('--num-workers', type=int, default=32, help = 'Number of workers')
 parser.add_argument('--prior', type=bool, default=False, help = 'Train prior')
 parser.add_argument('--posterior', type=bool, default=False, help = 'Train posterior')
@@ -44,6 +44,10 @@ if args.runfiles_path:
 manager = multiprocessing.Manager() 
 reward_buffer = manager.list()
 loss_buffer = manager.list()
+with open ('/home/km/working_dir_SF/checkpoint/reward.txt','w') as f:
+    f.write('Reward\n')
+with open ('/home/km/working_dir_SF/checkpoint/loss.txt','w') as f:
+    f.write('Loss\n')
 def train(rank, args, shared_model, reward_buffer, loss_buffer, shared_optimizer=None):
     env = deepmind_lab.Lab( 
     args.level_script, ['RGB_INTERLEAVED', 'INSTR'],
@@ -55,22 +59,28 @@ def train(rank, args, shared_model, reward_buffer, loss_buffer, shared_optimizer
     })
     env.reset()
     split = args.num_workers//3
-    if rank < split:
+    if rank < split + 1:
         agent = RL_Agent(env, ACTIONS, args, shared_model, shared_optimizer, device ='cuda:0', train_prior = args.prior , train_posterior = args.posterior)
-    elif rank < split*2:
+    elif rank < split*2 + 2:
         agent = RL_Agent(env, ACTIONS, args, shared_model, shared_optimizer, device ='cuda:1', train_prior = args.prior , train_posterior = args.posterior)
     else:
         agent = RL_Agent(env, ACTIONS, args, shared_model, shared_optimizer, device = 'cuda:2', train_prior = args.prior , train_posterior = args.posterior)
+    agent.fill_experience()
     while len(reward_buffer)<args.num_episodes:
-        loss, reward = agent.train()
+        if (len(reward_buffer)  + 1) % 10000 == 0:
+            with open ('/home/km/working_dir_SF/checkpoint/reward.txt','a') as f:
+                f.write(str(np.mean(reward_buffer[-10000:])) + '\n')
+            with open ('/home/km/working_dir_SF/checkpoint/loss.txt','a') as f:
+                f.write(str(np.mean(loss_buffer[-10000:])) + '\n')
+        reward, loss = agent.train()
         reward_buffer.append(reward)
         loss_buffer.append(loss)
-        print('Episode {}, loss {}, reward {}'.format(len(reward_buffer),loss,reward))
+        print('Episode {}, loss {}, reward {}'.format(len(reward_buffer), loss, reward))
         
 # Start the Reinforcement Learning agent
 #shared_model = Adv_Model(len(ACTIONS))
 shared_model = Model(len(ACTIONS))
-shared_model.load_state_dict(torch.load('/home/km/working_dir_SF/test_model3.pth'))
+#shared_model.load_state_dict(torch.load('/home/km/working_dir_SF/test_model3.pth'))
 shared_model.share_memory()
 #shared_optimizer = SharedRMSprop(shared_model.parameters(), lr=0.0001, eps = 0.1, weight_decay = 0.99)
 #shared_optimizer.share_memory()
@@ -92,6 +102,6 @@ for rank in range(0, args.num_workers):
         processes.append(p)
 for p in processes:
         p.join()
-torch.save(shared_model.state_dict(), '/home/km/working_dir_SF/test_model4.pth')
-np.save('/home/km/working_dir_SF/reward_90000.npy', np.array(reward_buffer))
-np.save('/home/km/working_dir_SF/loss_90000.npy', np.array(loss_buffer))
+torch.save(shared_model.state_dict(), '/home/km/working_dir_SF/new_model.pth')
+np.save('/home/km/working_dir_SF/reward_400000.npy', np.array(reward_buffer))
+np.save('/home/km/working_dir_SF/loss_400000.npy', np.array(loss_buffer))

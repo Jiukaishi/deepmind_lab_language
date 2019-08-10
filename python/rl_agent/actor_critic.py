@@ -60,19 +60,26 @@ class RL_Agent(object):
         self.train_posterior = train_posterior
         self.teacher_forcing_ratio = teaching_forcing_ratio
         if optimizer is None:
-            self.optimizer = optim.RMSprop(self.shared_model.parameters(), lr=0.0001, eps = 0.1, weight_decay = 0.99)
+            self.optimizer = optim.RMSprop(self.shared_model.parameters(), lr=0.00015, eps = 0.1, weight_decay = 0.99)
         else:
             self.optimizer = optimizer
         
-        self.memory = ReplayMemory(300)
+        self.memory = ReplayMemory(10000)
         self.args = args
         self.env = env
-        
+   
+    def adjust_learning_rate(self):
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] -= 0.0008/1000000
+            if  param_group['lr'] < 0:
+                param_group['lr'] = 0
+
+    
     def sync_to(self):
         for param, shared_param in zip(self.model.parameters(),self.shared_model.parameters()):
             if param.grad is None:
                 continue
-            if shared_param.grad is not None: 
+            if shared_param.grad is not None:
                 shared_param._grad += param.grad.cpu()
             else:
                 shared_param._grad = param.grad.cpu()
@@ -111,53 +118,64 @@ class RL_Agent(object):
         value_replay_loss = 0
 
         # Non-skewed sampling from experience buffer
-        if len(rewards)>=13:
-            auxiliary_sample = self.memory.sample(11)
-            auxiliary_batch = Transition(*zip(*auxiliary_sample))
-
-            
-
-            # TAE Loss
-            visual_input = auxiliary_batch.state[:10]
-            language_target = torch.cat([t.instruction for t  in visual_input], 0).view(-1)
-            visual_input = torch.cat([t.visual for t in visual_input], 0)
-            
-            visual_target = auxiliary_batch.state[1:11]
-            visual_target = torch.cat([t.visual for t in visual_target], 0)
-
-            action_logit = torch.cat(auxiliary_batch.action_logit[:10], 0)
-
-            tae_output = self.model.tAE(visual_input, action_logit)
-            tae_loss = torch.sum((tae_output - visual_target).pow(2))
-            
-            # Language Prediction Loss
-            lp_output = self.model.language_predictor(self.model.vision_m(visual_input))
-            language_prediction_loss = torch.nn.CrossEntropyLoss()(lp_output, language_target)
         
-        if len(rewards)>=15:
-            # Skewed-Sampling from experience buffer # TODO
-            skewed_sample = self.memory.sample_rp(13)  # memory.skewed_sample(13)
-            skewed_batch = Transition(*zip(*skewed_sample))
+        auxiliary_sample = self.memory.sample(10)
+        auxiliary_batch = Transition(*zip(*auxiliary_sample))
 
-            # Reward Prediction loss
-            batch_rp_input = []
-            batch_rp_output = []
+        # TAE Loss
+        visual_input = auxiliary_batch.state[:10]
+        language_target = torch.cat([t.instruction.to(self.device) for t  in visual_input], 0).view(-1)
+        visual_input = torch.cat([t.visual.to(self.device) for t in visual_input], 0)
 
-            for i in range(10):
-                rp_input = skewed_batch.state[i : i+3]
-                rp_output = skewed_batch.reward[i+3]
+        visual_target = auxiliary_batch.next_state[:10]
+        visual_target = torch.cat([t.visual.to(self.device) for t in visual_target], 0)
 
-                batch_rp_input.append(rp_input)
-                batch_rp_output.append(rp_output)
-    
-            rp_predicted = self.model.reward_predictor(batch_rp_input)
-            
-            reward_prediction_loss = \
-                            torch.sum((rp_predicted - Variable(torch.FloatTensor(batch_rp_output)).to(self.device)).pow(2))
+        action = torch.cat(auxiliary_batch.action[:10], 0).to(self.device)
+
+        tae_output = self.model.tAE(visual_input, action)
+        tae_loss = torch.sum((tae_output - visual_target).pow(2))
+
+        # Language Prediction Loss
+        lp_output = self.model.language_predictor(self.model.vision_m(visual_input))
+        language_prediction_loss = torch.nn.CrossEntropyLoss()(lp_output, language_target)
+
+        # Skewed-Sampling from experience buffer # TODO
+        skewed_sample = self.memory.sample_rp(10)  # memory.skewed_sample(13)         
+
+        # Reward Prediction loss
+        batch_rp_input = []
+        batch_rp_output = []
+        for i in range(10):
+            rp_input = [State(state.visual.to(self.device), state.instruction.to(self.device)) for state in skewed_sample[i].state[:3]]
+            rp_output = skewed_sample[i].reward[3] + 1
+
+            batch_rp_input.append(rp_input)
+            batch_rp_output.append(rp_output)
+        
+        rp_predicted = self.model.reward_predictor(batch_rp_input)
+
+        reward_prediction_loss = \
+                        torch.nn.CrossEntropyLoss()(rp_predicted, torch.LongTensor(batch_rp_output).to(self.device))
+
+
          # Value function replay
-        index = np.random.randint(0, len(rewards))
-        R_vr = values[index+1].data * self.args.gamma + rewards[index]
-        value_replay_loss = 0.5 * torch.squeeze((R_vr - values[index]).pow(2))
+        vr_sample = self.memory.sample_vr()
+        vr_batch = Transition(*zip(*vr_sample))
+        h1, c1 = (Variable(torch.zeros(1, 256)).to(self.device), 
+                    Variable(torch.zeros(1, 256)).to(self.device))         
+        h2, c2 = (Variable(torch.zeros(1, 256)).to(self.device), 
+                    Variable(torch.zeros(1, 256)).to(self.device)) 
+        value_batch = []
+        for i in range(4):
+            _, v_r, h1, c1, h2, c2 = self.model(State(vr_batch.state[i].visual.to(self.device), \
+                                                      vr_batch.state[i].instruction.to(self.device)),\
+                                                h1, c1, h2, c2)
+            value_batch.append(v_r)
+        with torch.no_grad():
+                _, R, _, _, _, _ = self.model(State(vr_batch.next_state[-1].visual.to(self.device), vr_batch.next_state[-1].instruction.to(self.device)), h1, c1, h2, c2)                   
+        for i in reversed(range(4)):
+            R = self.args.gamma * R + vr_batch.reward[i]
+            value_replay_loss += 0.5 * (R - value_batch[i]).pow(2)
 
               
         # advice reconstruction
@@ -184,7 +202,7 @@ class RL_Agent(object):
                 language_prediction_loss += self.prior_criterion(
                     advice_pred[:min_length], advice[i][:min_length]
                 )
-         
+        self.adjust_learning_rate()
         self.model.zero_grad()    
        
         # Back-propagation
@@ -259,40 +277,72 @@ class RL_Agent(object):
         order = torch.LongTensor([[word2id[word] for word in state['INSTR'].split()]]).to(self.device)
         
         return State(img, order)
+    
+    def fill_experience(self):
+        h1, c1 = (Variable(torch.zeros(1, 256)).to(self.device), 
+                    Variable(torch.zeros(1, 256)).to(self.device)) 
 
+        h2, c2 = (Variable(torch.zeros(1, 256)).to(self.device), 
+                    Variable(torch.zeros(1, 256)).to(self.device)) 
+        
+        state = self.process_state(self.env.observations())
+        episode_length = 0
+        while not self.memory.full():
+            episode_length += 1
+            with torch.no_grad():
+                logit, value, h1_, c1_, h2_, c2_ = self.model(state, h1, c1, h2, c2)
+            prob = F.softmax(logit,dim=-1)
+            action = prob.multinomial(1).data
+            action_encoding = torch.zeros((1,len(ACTIONS)))
+            reward = self.env.step(self.ACTIONS[action.cpu().numpy()[0][0]], num_steps=4)
+            reward = max(min(reward, 1), -1)
+            next_state = self.process_state(self.env.observations())
+            self.memory.push(episode_length, State(state.visual.cpu(), state.instruction.cpu()), action_encoding, State(next_state.visual.cpu(), next_state.instruction.cpu()), reward, value.cpu())
+            state = next_state
+            if (episode_length >= 300) or (reward != 0):
+                episode_length = 0
+                self.env.reset()
+                h1, c1 = (Variable(torch.zeros(1, 256)).to(self.device), 
+                    Variable(torch.zeros(1, 256)).to(self.device)) 
+
+                h2, c2 = (Variable(torch.zeros(1, 256)).to(self.device), 
+                    Variable(torch.zeros(1, 256)).to(self.device)) 
+        
+                state = self.process_state(self.env.observations())
+        
     def train(self):
 
-            h1, c1 = (Variable(torch.randn(1, 256)).to(self.device), 
-                        Variable(torch.randn(1, 256)).to(self.device)) 
+            h1, c1 = (Variable(torch.zeros(1, 256)).to(self.device), 
+                        Variable(torch.zeros(1, 256)).to(self.device)) 
         
-            h2, c2 = (Variable(torch.randn(1, 256)).to(self.device), 
-                        Variable(torch.randn(1, 256)).to(self.device)) 
+            h2, c2 = (Variable(torch.zeros(1, 256)).to(self.device), 
+                        Variable(torch.zeros(1, 256)).to(self.device)) 
             state = self.process_state(self.env.observations())
             episode_length = 0
             values = []
             log_probs = []
             rewards = []
             entropies = []
-            #advice = []
-            #representation = []
-            while True:
-                #advice.append(state.instruction)
+            running_loss = []
+            while True:               
                 episode_length += 1
-                logit, value, h1, c1, h2, c2 = self.model(state, h1, c1, h2, c2)
+                logit, value, h1_, c1_, h2_, c2_ = self.model(state, h1, c1, h2, c2)
                 # Calculate entropy from action probability distribution
                 prob = F.softmax(logit,dim=-1)
                 log_prob = F.log_softmax(logit,dim=-1)
                 entropy = -(log_prob * prob).sum(1,keepdim=True)
                 entropies.append(entropy)
-                #representation.append(mix_out)
+                
 
                 # Take an action from distribution
                 action = prob.multinomial(1).data
+                action_encoding = torch.zeros((1,len(ACTIONS)))
+                action_encoding[0][action] = 1
                 log_prob = log_prob.gather(1, action)       
 
                 # Perform the action on the environment
                 reward = self.env.step(self.ACTIONS[action.cpu().numpy()[0][0]], num_steps=4)
-
+                reward = max(min(reward, 1), -1)
                 if not self.env.is_running():
                     print('Environment stops early')
                     self.env.reset() # Environment timed-out 
@@ -304,23 +354,36 @@ class RL_Agent(object):
                 rewards.append(reward)
                 
                 # Push to experience replay buffer
-                self.memory.push(state, logit, next_state, reward, value)
+                
+                self.memory.push(episode_length, State(state.visual.cpu(), state.instruction.cpu()), action_encoding, State(next_state.visual.cpu(), next_state.instruction.cpu()), reward, value.cpu().data)
 
+                  
                 # move to next state
                 state = next_state
-
                 # Go to next episode
-                if (episode_length >= 300) | (reward != 0):
+                if (episode_length >= 300) or (reward != 0):
                     if reward ==0:                  
                         final_value = torch.zeros(1,1).to(self.device)
                     else:
-                        _, final_value, _, _, _, _ = self.model(next_state, h1, c1, h2, c2)
+                        with torch.no_grad():
+                            _, final_value, _, _, _, _ = self.model(next_state, h1, c1, h2, c2)
                     values.append(final_value)
                     self.env.reset()
-                    loss = self.optimize_model(values, log_probs, rewards, entropies)   
-                    self.memory.clear()
-                    return loss, reward
+                    loss = self.optimize_model(values, log_probs, rewards, entropies)  
+                    running_loss.append(loss)
+                    return reward, np.mean(running_loss)
+                
                 if episode_length % 50 == 0:
                     h1, c1, h2, c2 = h1.data, c1.data, h2.data, c2.data
+                    with torch.no_grad():
+                            _, final_value, _, _, _, _ = self.model(next_state, h1, c1, h2, c2)
+                    values.append(final_value)
+                    loss = self.optimize_model(values, log_probs, rewards, entropies)  
+                    running_loss.append(loss)
+                    values = []
+                    log_probs = []
+                    rewards = []
+                    entropies = []
+                    running_loss = []
 
                     

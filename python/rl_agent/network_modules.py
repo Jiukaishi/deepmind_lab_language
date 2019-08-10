@@ -80,7 +80,6 @@ class Action_M(nn.Module):
         super(Action_M, self).__init__()
         self.batch_size = batch_size
         self.hidden_size = hidden_size
-        
         self.lstm_1 = nn.LSTMCell(input_size=3264, hidden_size=256)
         self.lstm_2 = nn.LSTMCell(input_size=256, hidden_size=256)
         
@@ -201,7 +200,7 @@ class RewardPredictor(nn.Module):
         self.vision_module = vision_module
         self.language_module = language_module
         self.mixing_module = mixing_module
-        self.linear = nn.Linear(3 * (64 * 7 * 7 + 128), 1)
+        self.linear = nn.Linear(3 * (64 * 7 * 7 + 128), 3)
         nn.init.uniform_(self.linear.weight,0.1,1)
     
     def forward(self, x):
